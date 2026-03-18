@@ -367,13 +367,15 @@ function patchHtml(rawHtml, newCA, dexUrl) {
 
   // 9b. Update OG/Twitter image URLs to absolute paths
   var baseUrl = 'https://solana-seven-rouge.vercel.app/';
+  if (!window.previewFilename) window.previewFilename = 'site_preview_' + Date.now() + '.png';
+
   html = html.replace(
     /(<meta property="og:image" content=")[^"]*(")/gi,
-    '$1' + baseUrl + 'site_preview.png?v=' + Date.now() + '$2'
+    '$1' + baseUrl + window.previewFilename + '$2'
   );
   html = html.replace(
     /(<meta (?:property|name)="twitter:image" content=")[^"]*(")/gi,
-    '$1' + baseUrl + 'site_preview.png?v=' + Date.now() + '$2'
+    '$1' + baseUrl + window.previewFilename + '$2'
   );
 
   // 9c. Update OG/Twitter URLs (handles empty values too)
@@ -424,6 +426,8 @@ function patchHtml(rawHtml, newCA, dexUrl) {
 // ── Apply & save ──
 function applyAndSave() {
   if (!loadedHtml || !tokenData) return;
+
+  window.previewFilename = 'site_preview_' + Date.now() + '.png';
 
   var ca = document.getElementById('caInput').value.trim();
   var dexUrl = tokenData.url || ('https://dexscreener.com/solana/' + (tokenData.pairAddress || ''));
@@ -497,20 +501,20 @@ async function generateSitePreview() {
   var navW = 120, navH = 56;
   var navX = (w - navW) / 2, navY = 22;
   // Nav background pill
-  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillStyle = 'rgba(0,0,0,0.40)';
   _roundRect(ctx, navX, navY, navW, navH, 16);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.20)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
   ctx.lineWidth = 1;
   _roundRect(ctx, navX, navY, navW, navH, 16);
   ctx.stroke();
   // X icon (left pill)
   var iconSize = 40;
   var ix1 = navX + 8, iy = navY + 8;
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillStyle = 'rgba(0,0,0,0.80)';
   _roundRect(ctx, ix1, iy, iconSize, iconSize, 10);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 1;
   _roundRect(ctx, ix1, iy, iconSize, iconSize, 10);
   ctx.stroke();
@@ -521,10 +525,10 @@ async function generateSitePreview() {
   ctx.fillText('𝕏', ix1 + iconSize/2, iy + iconSize/2 + 7);
   // DexScreener icon (right pill)
   var ix2 = navX + navW - iconSize - 8;
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillStyle = 'rgba(0,0,0,0.80)';
   _roundRect(ctx, ix2, iy, iconSize, iconSize, 10);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 1;
   _roundRect(ctx, ix2, iy, iconSize, iconSize, 10);
   ctx.stroke();
@@ -710,22 +714,28 @@ async function saveToFolder() {
         } catch (_) {}
 
         try {
-          var previewHandle = await dir.getFileHandle('site_preview.png', { create: true });
+          for await (const entry of dir.values()) {
+            if (entry.kind === 'file' && entry.name.startsWith('site_preview') && entry.name.endsWith('.png')) {
+              await dir.removeEntry(entry.name);
+            }
+          }
+
+          var previewHandle = await dir.getFileHandle(window.previewFilename, { create: true });
           var previewWritable = await previewHandle.createWritable({ keepExistingData: false });
           await previewWritable.write(previewBlob);
           await previewWritable.close();
           var writtenFile = await previewHandle.getFile();
-          console.log('✅ site_preview.png saved', { size: writtenFile.size });
-          previewStatus = ' + site_preview.png (' + Math.round(writtenFile.size / 1024) + ' KB)';
+          console.log('✅ ' + window.previewFilename + ' saved', { size: writtenFile.size });
+          previewStatus = ' + ' + window.previewFilename + ' (' + Math.round(writtenFile.size / 1024) + ' KB)';
         } catch (writeErr) {
           console.error('Preview folder write failed:', writeErr);
-          try { downloadBlob(previewBlob, 'site_preview.png'); } catch (_) {}
-          previewStatus = ' (site_preview.png downloaded — folder write failed)';
+          try { downloadBlob(previewBlob, window.previewFilename); } catch (_) {}
+          previewStatus = ' (' + window.previewFilename + ' downloaded — folder write failed)';
         }
       }
     } catch (err) {
       console.error('Preview generation failed:', err);
-      previewStatus = ' (site_preview.png failed: ' + (err.message || err) + ')';
+      previewStatus = ' (preview failed: ' + (err.message || err) + ')';
     }
 
     setStatus('si-save', 'ok', 'Saved ✓');
