@@ -1,415 +1,791 @@
-#!/usr/bin/env node
-/**
- * CA Updater Script
- * 
- * Usage: node update_ca.js <CONTRACT_ADDRESS>
- * 
- * Fetches token info from DexScreener, downloads the logo,
- * and updates index.html with the new CA, DexScreener link, and image.
- */
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CA Updater</title>
+<script src="https://unpkg.com/html2canvas-pro@2.0.2/dist/html2canvas-pro.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.box{background:#1e293b;border-radius:16px;padding:36px 40px;max-width:560px;width:100%;box-shadow:0 25px 60px rgba(0,0,0,.5)}
+h1{font-size:22px;margin-bottom:6px}
+.sub{color:#64748b;font-size:13px;margin-bottom:24px;line-height:1.7}
 
-const https = require('https');
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
+.field{margin-bottom:18px}
+.field-label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;display:block}
+.ca-wrap{display:flex;gap:8px}
+.ca-input{flex:1;background:#0b1628;border:2px solid #2d3f55;border-radius:10px;padding:13px 14px;color:#e2e8f0;font-family:monospace;font-size:14px;font-weight:700;outline:none;transition:.2s}
+.ca-input:focus{border-color:#6366f1}
+.ca-input::placeholder{color:#334155;font-weight:400;font-size:13px;font-family:'Segoe UI',Arial,sans-serif}
+.fetch-btn{background:#6366f1;color:#fff;border:none;padding:13px 22px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:700;white-space:nowrap;transition:.2s}
+.fetch-btn:hover{background:#4f46e5}
+.fetch-btn:disabled{background:#334155;cursor:not-allowed}
 
-const PROJECT_DIR = __dirname;
-const INDEX_FILE = path.join(PROJECT_DIR, 'index.html');
-const LOGO_FILENAME = 'token_logo.png';
-const LOGO_PATH = path.join(PROJECT_DIR, LOGO_FILENAME);
-const BASE_URL = 'https://solana-seven-rouge.vercel.app/';
+.token-preview{display:none;align-items:center;gap:16px;background:#0b1628;border-radius:10px;padding:14px 16px;margin-bottom:18px;border:1px solid #2d3f55}
+.token-preview.show{display:flex}
+.tp-logo{width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid #2d3f55;background:#1e293b;flex-shrink:0}
+.tp-info h3{font-size:16px;font-weight:800;margin-bottom:2px}
+.tp-info p{color:#64748b;font-size:13px}
+.tp-ca{font-family:monospace;font-size:11px;color:#475569;word-break:break-all;margin-top:4px}
 
-// ── Helpers ──────────────────────────────────────────────────────────
+.folder-btn{width:100%;background:#0b1628;border:2px dashed #2d3f55;border-radius:14px;padding:30px 20px;text-align:center;cursor:pointer;transition:.2s;user-select:none;margin-bottom:14px}
+.folder-btn:hover{border-color:#6366f1;background:rgba(99,102,241,.07)}
+.folder-btn.done{border-color:#10b981;border-style:solid;background:rgba(16,185,129,.05)}
+.folder-btn.loading{border-color:#6366f1;border-style:solid;background:rgba(99,102,241,.05)}
+.f-icon{font-size:36px;margin-bottom:8px;display:block}
+.f-label{font-size:15px;font-weight:600;color:#94a3b8;margin-bottom:4px}
+.f-sub{font-size:12px;color:#475569}
 
-function fetchJSON(url) {
-    return new Promise((resolve, reject) => {
-        const client = url.startsWith('https') ? https : http;
-        client.get(url, { headers: { 'User-Agent': 'CA-Updater/1.0' } }, (res) => {
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                return fetchJSON(res.headers.location).then(resolve).catch(reject);
-            }
-            if (res.statusCode !== 200) {
-                return reject(new Error(`HTTP ${res.statusCode} from ${url}`));
-            }
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try { resolve(JSON.parse(data)); }
-                catch (e) { reject(new Error('Failed to parse JSON: ' + e.message)); }
-            });
-        }).on('error', reject);
-    });
+.status-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.sitem{background:#0b1628;border-radius:8px;padding:10px 12px;border:1px solid #1e2d40;display:flex;align-items:flex-start;gap:7px}
+.dot{width:8px;height:8px;border-radius:50%;background:#334155;flex-shrink:0;margin-top:3px;transition:.3s}
+.sitem.ok .dot{background:#10b981}
+.sitem.err .dot{background:#ef4444}
+.slbl{font-size:11px;color:#475569}
+.sitem.ok .slbl{color:#94a3b8}
+.sval{font-size:10px;color:#34d399;margin-top:2px;display:none;word-break:break-all}
+.sitem.ok .sval,.sitem.err .sval{display:block}
+.sitem.err .sval{color:#f87171}
+
+.apply-btn{display:none;width:100%;margin-top:14px;background:#10b981;color:#fff;border:none;padding:15px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:.2s}
+.apply-btn:hover{background:#059669}
+.apply-btn.show{display:block}
+.apply-btn:disabled{background:#334155;cursor:not-allowed}
+
+.save-panel{display:none;margin-top:14px;background:#0b1628;border:2px solid #2d3f55;border-radius:10px;padding:16px 18px}
+.save-panel.show{display:block}
+.save-panel p{font-size:13px;color:#64748b;margin-bottom:10px;line-height:1.6}
+.save-btn{width:100%;background:#6366f1;color:#fff;border:none;padding:13px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;transition:.2s}
+.save-btn:hover{background:#4f46e5}
+.save-btn:disabled{background:#334155;cursor:not-allowed}
+
+.msg{border-radius:8px;padding:11px 14px;font-size:13px;margin-top:10px;display:none;line-height:1.6}
+.msg.ok {background:rgba(16,185,129,.1);color:#34d399;display:block;border:1px solid rgba(16,185,129,.2)}
+.msg.err{background:rgba(239,68,68,.1);color:#f87171;display:block;border:1px solid rgba(239,68,68,.2)}
+.msg.inf{background:rgba(99,102,241,.1);color:#a5b4fc;display:block;border:1px solid rgba(99,102,241,.2)}
+
+.steps{margin-top:20px;background:#0b1628;border-radius:10px;padding:14px 18px;font-size:12px;color:#475569;line-height:2.2;border:1px solid #1e2d40}
+.steps b{color:#64748b}
+code{background:#1e293b;padding:1px 6px;border-radius:4px;font-size:11px;color:#94a3b8;border:1px solid #2d3f55}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>🔄 CA Updater</h1>
+  <p class="sub">Paste a Solana contract address — <b>index.html and logo are updated automatically on disk</b>. No download needed.</p>
+
+  <!-- Step 1: Contract Address -->
+  <div class="field">
+    <span class="field-label">Contract Address</span>
+    <div class="ca-wrap">
+      <input class="ca-input" id="caInput" type="text" placeholder="Paste Solana contract address..." maxlength="60">
+      <button class="fetch-btn" id="fetchBtn" onclick="fetchToken()">Fetch</button>
+    </div>
+  </div>
+
+  <!-- Token preview card -->
+  <div class="token-preview" id="tokenPreview">
+    <img class="tp-logo" id="previewLogo" src="" alt="">
+    <div class="tp-info">
+      <h3 id="previewName">—</h3>
+      <p id="previewSymbol">—</p>
+      <div class="tp-ca" id="previewCA">—</div>
+    </div>
+  </div>
+
+  <!-- Step 2: Pick folder -->
+  <input type="file" id="folderInput" webkitdirectory style="display:none">
+  <div class="folder-btn" id="folderBtn" onclick="document.getElementById('folderInput').click()">
+    <span class="f-icon" id="fIcon">📁</span>
+    <div class="f-label" id="fLabel">Click to Select Your Website Folder</div>
+    <div class="f-sub" id="fSub">Finds index.html — updates CA, DexScreener link & logo</div>
+  </div>
+
+  <!-- Status indicators -->
+  <div class="status-row">
+    <div class="sitem" id="si-html"><div class="dot"></div><div><div class="slbl">index.html</div><div class="sval" id="sv-html"></div></div></div>
+    <div class="sitem" id="si-logo"><div class="dot"></div><div><div class="slbl">Logo</div><div class="sval" id="sv-logo"></div></div></div>
+    <div class="sitem" id="si-save"><div class="dot"></div><div><div class="slbl">Saved</div><div class="sval" id="sv-save"></div></div></div>
+  </div>
+
+  <!-- Apply button -->
+  <button class="apply-btn" id="applyBtn" onclick="applyAndSave()">✅ Apply & Save to Folder</button>
+
+  <!-- Save panel for File System Access API -->
+  <div class="save-panel" id="savePanel">
+    <p id="savePanelMsg">Changes are ready. Click below to save directly to your folder.</p>
+    <button class="save-btn" id="saveBtn" onclick="saveToFolder()">💾 Save to Folder</button>
+    <button class="save-btn" id="previewDlBtn" style="display:none;margin-top:10px;background:#0b1628;border:2px solid #2d3f55" onclick="downloadLatestPreview()">⬇ Download site_preview.png</button>
+  </div>
+
+  <div class="msg" id="msg"></div>
+
+  <div class="steps">
+    <b>How it works:</b><br>
+    1. Paste contract address & click <b>Fetch</b> — logo is fetched from DexScreener<br>
+    2. Click the folder button — select your website folder<br>
+    3. Click <b>Apply & Save</b> — grant permission once<br>
+    4. <code>index.html</code> + <code>token_logo.png</code> saved directly ✅<br>
+    5. Upload to Vercel or open <code>index.html</code> from file
+  </div>
+</div>
+
+<script>
+// ── State ──
+var loadedHtml = null;
+var patchedHtml = null;
+var tokenData = null;
+var logoBlob = null;
+var logoUrl = '';
+var folderName = null;
+var latestPreviewBlob = null;
+
+// Running on file:// is not a secure context; some save/download behaviors can be blocked.
+try {
+  if (location && location.protocol === 'file:') {
+    setMsg('inf', 'Tip: For reliable saving + preview downloads, open this updater via http://localhost (secure context). file:// can block background downloads.');
+  }
+} catch (_) {}
+
+// ── CSS + HTML to inject for circular floating logo ──
+var LOGO_CSS = '\n        @keyframes float {\n            0%, 100% { transform: translateY(0px) rotate(0deg); }\n            25% { transform: translateY(-12px) rotate(1.5deg); }\n            50% { transform: translateY(-6px) rotate(0deg); }\n            75% { transform: translateY(-14px) rotate(-1.5deg); }\n        }\n\n        .token-logo-frame {\n            width: 350px;\n            height: 350px;\n            border-radius: 50%;\n            overflow: hidden;\n            border: 3px solid rgba(255, 255, 255, 0.25);\n            box-shadow: 0 0 60px rgba(255, 200, 0, 0.35), 0 0 120px rgba(255, 150, 0, 0.15), inset 0 0 30px rgba(0,0,0,0.3);\n            animation: float 4s ease-in-out infinite;\n        }\n\n        .token-logo-frame img {\n            width: 100%;\n            height: 100%;\n            object-fit: cover;\n            display: block;\n        }\n\n        .logo-center-wrap {\n            position: fixed;\n            top: 70%;\n            left: 50%;\n            transform: translate(-50%, -50%);\n            z-index: 30;\n        }';
+
+// ── Step 1: Fetch token from DexScreener ──
+async function fetchToken() {
+  var ca = document.getElementById('caInput').value.trim();
+  if (!ca) return setMsg('err', 'Please paste a contract address.');
+
+  var btn = document.getElementById('fetchBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  setMsg('', '');
+
+  try {
+    var res = await fetch('https://api.dexscreener.com/tokens/v1/solana/' + ca);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var pairs = await res.json();
+    if (!Array.isArray(pairs) || pairs.length === 0) throw new Error('No pairs found on DexScreener for this address.');
+
+    tokenData = pairs[0];
+    var name = (tokenData.baseToken && tokenData.baseToken.name) || 'Unknown';
+    var symbol = (tokenData.baseToken && tokenData.baseToken.symbol) || '???';
+    logoUrl = (tokenData.info && tokenData.info.imageUrl) || '';
+
+    // Show preview
+    document.getElementById('previewName').textContent = name;
+    document.getElementById('previewSymbol').textContent = '$' + symbol;
+    document.getElementById('previewCA').textContent = ca;
+    document.getElementById('tokenPreview').className = 'token-preview show';
+
+    // Download logo blob (with CORS proxy fallback)
+    if (logoUrl) {
+      var fetchUrls = [
+        'https://wsrv.nl/?url=' + encodeURIComponent(logoUrl),
+        'https://api.allorigins.win/raw?url=' + encodeURIComponent(logoUrl),
+        'https://corsproxy.io/?' + encodeURIComponent(logoUrl),
+        logoUrl
+      ];
+      var fetched = false;
+      for (var i = 0; i < fetchUrls.length && !fetched; i++) {
+        try {
+          var logoRes = await fetch(fetchUrls[i]);
+          if (!logoRes.ok) throw new Error('HTTP ' + logoRes.status);
+          logoBlob = await logoRes.blob();
+          if (logoBlob.size < 100) throw new Error('Too small');
+          document.getElementById('previewLogo').src = URL.createObjectURL(logoBlob);
+          setStatus('si-logo', 'ok', 'Fetched ✓');
+          fetched = true;
+        } catch (e) {
+          logoBlob = null;
+        }
+      }
+      if (!fetched) {
+        // Last resort: load via img tag (can preview but not save as blob)
+        document.getElementById('previewLogo').src = logoUrl;
+        setStatus('si-logo', 'err', 'Preview only — save logo manually');
+        setMsg('inf', 'Logo preview loaded but cannot auto-save due to CORS. Right-click the logo preview above and "Save image as" → token_logo.png');
+      }
+    } else {
+      setStatus('si-logo', 'err', 'No logo on DexScreener');
+    }
+
+    setMsg('ok', '✅ Found: ' + name + ' ($' + symbol + ')');
+    checkReady();
+  } catch (err) {
+    setMsg('err', '❌ ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fetch';
+  }
 }
 
-function downloadFile(url, dest) {
-    return new Promise((resolve, reject) => {
-        const client = url.startsWith('https') ? https : http;
-        client.get(url, { headers: { 'User-Agent': 'CA-Updater/1.0' } }, (res) => {
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                return downloadFile(res.headers.location, dest).then(resolve).catch(reject);
-            }
-            if (res.statusCode !== 200) {
-                return reject(new Error(`HTTP ${res.statusCode} downloading image`));
-            }
-            const file = fs.createWriteStream(dest);
-            res.pipe(file);
-            file.on('finish', () => { file.close(); resolve(); });
-            file.on('error', (err) => { fs.unlink(dest, () => {}); reject(err); });
-        }).on('error', reject);
-    });
-}
+// ── Step 2: Folder input (webkitdirectory) ──
+document.getElementById('folderInput').addEventListener('change', function() {
+  var files = this.files;
+  if (!files || !files.length) return;
 
-function takeScreenshot() {
-    console.log('📸  Generating new site preview screenshot...');
-    const chromeCandidates = [
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    ];
-    const chromePath = chromeCandidates.find(p => fs.existsSync(p));
-    
-    // Format the file URL correctly for Windows
-    const absolutePath = path.resolve(INDEX_FILE);
-    const fileUrl = 'file:///' + absolutePath.replace(/\\/g, '/');
-    const outputPath = path.join(PROJECT_DIR, 'site_preview.png');
-    
-    try {
-        if (!chromePath) {
-            console.error('❌  Could not find Chrome/Edge to take screenshot.');
-            return;
-        }
-        console.log(`    Source: ${fileUrl}`);
-        // Use headless chrome to take a screenshot
-        const result = spawnSync(chromePath, [
-            '--headless',
-            `--screenshot=${outputPath}`,
-            '--window-size=1200,630',
-            '--force-device-scale-factor=1',
-            '--hide-scrollbars',
-            '--virtual-time-budget=5000',
-            '--run-all-compositor-stages-before-draw',
-            '--no-sandbox',
-            fileUrl
-        ]);
+  setStatus('si-html','','');
+  setStatus('si-save','','');
+  setMsg('','');
+  loadedHtml = null;
+  patchedHtml = null;
+  document.getElementById('savePanel').className = 'save-panel';
+  document.getElementById('applyBtn').className = 'apply-btn';
 
-        if (result.error) {
-            throw result.error;
-        }
-        if (typeof result.status === 'number' && result.status !== 0) {
-            throw new Error(`Browser exited with code ${result.status}`);
-        }
+  document.getElementById('fIcon').textContent = '⏳';
+  document.getElementById('fLabel').textContent = 'Reading files...';
+  document.getElementById('fSub').textContent = '';
+  document.getElementById('folderBtn').className = 'folder-btn loading';
 
-        console.log('✅  Screenshot saved to site_preview.png');
-    } catch (err) {
-        console.error(`❌  Failed to take screenshot: ${err.message}`);
+  var htmlFile = null;
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var parts = (f.webkitRelativePath || f.name).split('/');
+    if (parts.length > 2) continue; // Only top-level files
+    if (f.name.toLowerCase() === 'index.html') {
+      htmlFile = f;
+      folderName = parts[0];
+      break;
     }
-}
+  }
 
-// ── Main ─────────────────────────────────────────────────────────────
+  if (!htmlFile) {
+    document.getElementById('fIcon').textContent = '❌';
+    document.getElementById('fLabel').textContent = 'index.html not found';
+    document.getElementById('fSub').textContent = 'Select the correct website folder';
+    document.getElementById('folderBtn').className = 'folder-btn';
+    setMsg('err', 'No index.html found. Make sure you selected the right folder.');
+    return;
+  }
 
-async function main() {
-    const newCA = process.argv[2];
-    if (!newCA) {
-        console.error('\n  Usage: node update_ca.js <CONTRACT_ADDRESS>\n');
-        console.error('  Example: node update_ca.js EPuZ1X6pPzac3ELPsT59LStmgaSr4kBJvaAbL15Fpump\n');
-        process.exit(1);
-    }
-
-    console.log(`\n🔍  Fetching token info for: ${newCA}`);
-
-    // 1. Fetch token data from DexScreener
-    const apiUrl = `https://api.dexscreener.com/tokens/v1/solana/${newCA}`;
-    let pairs;
-    try {
-        pairs = await fetchJSON(apiUrl);
-    } catch (err) {
-        console.error(`❌  Failed to fetch from DexScreener: ${err.message}`);
-        process.exit(1);
-    }
-
-    if (!Array.isArray(pairs) || pairs.length === 0) {
-        console.error('❌  No pairs found on DexScreener for this contract address.');
-        process.exit(1);
-    }
-
-    const pair = pairs[0];
-    const tokenName = pair.baseToken?.name || 'Unknown';
-    const tokenSymbol = pair.baseToken?.symbol || '???';
-    const pairAddress = pair.pairAddress || '';
-    const imageUrl = pair.info?.imageUrl || '';
-    const dexUrl = pair.url || `https://dexscreener.com/solana/${pairAddress}`;
-
-    console.log(`✅  Found: ${tokenName} ($${tokenSymbol})`);
-    console.log(`    Pair: ${pairAddress}`);
-    console.log(`    DexScreener: ${dexUrl}`);
-
-    // 2. Download the logo
-    let downloadedLogo = false;
-    if (imageUrl) {
-        console.log(`📥  Downloading logo...`);
-        const fetchUrls = [
-            `https://wsrv.nl/?url=${encodeURIComponent(imageUrl)}`,
-            imageUrl
-        ];
-
-        for (const url of fetchUrls) {
-            try {
-                await downloadFile(url, LOGO_PATH);
-                console.log(`✅  Logo saved to ${LOGO_FILENAME}`);
-                downloadedLogo = true;
-                break;
-            } catch (err) {
-                console.log(`    ⚠️  Failed with ${url}: ${err.message}`);
-            }
-        }
-
-        if (!downloadedLogo) {
-            console.log('    ❌  All attempts to download logo failed. Image will not be updated.');
-        }
-    } else {
-        console.log('⚠️  No logo URL found on DexScreener. Image will not be updated.');
-    }
-
-    // 3. Update index.html
-    console.log(`📝  Updating index.html...`);
-
-    let html;
-    try {
-        html = fs.readFileSync(INDEX_FILE, 'utf8');
-    } catch (err) {
-        console.error(`❌  Cannot read ${INDEX_FILE}: ${err.message}`);
-        process.exit(1);
-    }
-
-    let changes = 0;
-
-    // 3a. Replace the CA text in the bottom bar
-    //     Matches the span that contains the contract address (alphanumeric string)
-    const caRegex = /(<span[^>]*class="[^"]*font-mono[^"]*"[^>]*>)[A-Za-z0-9]{30,50}(<\/span>)/;
-    if (caRegex.test(html)) {
-        html = html.replace(caRegex, `$1${newCA}$2`);
-        console.log('    ✓ Contract address updated');
-        changes++;
-    } else {
-        console.log('    ⚠ Could not find CA span to update');
-    }
-
-    // 3b. Replace the DexScreener link
-    const dexLinkRegex = /(href=")(https:\/\/dexscreener\.com\/solana\/[A-Za-z0-9]+)(")/;
-    if (dexLinkRegex.test(html)) {
-        html = html.replace(dexLinkRegex, `$1${dexUrl}$3`);
-        console.log('    ✓ DexScreener link updated');
-        changes++;
-    } else {
-        console.log('    ⚠ Could not find DexScreener link to update');
-    }
-
-    // 3c. Replace the title and header with actual name and symbol
-    const titleRegex = /(<title>)[^<]*(<\/title>)/gi;
-    if (titleRegex.test(html)) {
-        html = html.replace(titleRegex, `$1$${tokenName.toUpperCase()}$2`);
-        console.log('    ✓ Title updated');
-        changes++;
-    }
-
-    const headerRegex = /(<span class="text-white">)[^<]*(<\/span>)/gi;
-    if (headerRegex.test(html)) {
-        html = html.replace(headerRegex, `$1$${tokenSymbol.toUpperCase()}$2`);
-        console.log('    ✓ Header symbol updated');
-        changes++;
-    }
-
-    // New: Replace symbol in h1 tag (The $... Airdrop is Live)
-    const h1SymbolRegex = /(<h1[^>]*>.*?<span[^>]*>\$)[^<]*(<\/span>)/gi;
-    if (h1SymbolRegex.test(html)) {
-        html = html.replace(h1SymbolRegex, `$1${tokenSymbol.toUpperCase()}$2`);
-        console.log('    ✓ H1 symbol updated');
-        changes++;
-    }
-
-    // Keep your existing sentence, but ensure placeholder is resolved.
-    // Example: "Eligible users ... distribution of $SYMBOL tokens."
-    // becomes:  "Eligible users ... distribution of $SYMBOL FACE tokens."
-    const distLineRegex = /(Eligible\s+users\s+are\s+invited\s+to\s+take\s+part\s+in\s+the\s+distribution\s+of\s+)\$DISTORTED(\b)/i;
-    if (distLineRegex.test(html)) {
-        html = html.replace(distLineRegex, `$1$${tokenSymbol.toUpperCase()}$2`);
-        console.log('    ✓ Distribution line placeholder updated');
-        changes++;
-    }
-
-    // 3d. Update Meta Tags (OG / Twitter)
-    // NOTE: Do NOT use .test() before .replace() with /g flag — .test() advances
-    // lastIndex so the subsequent .replace() misses the match.
-    html = html.replace(/(<meta property="og:image" content=")[^"]*(")/gi, `$1${BASE_URL}site_preview.png?v=${Date.now()}$2`);
-    console.log('    ✓ og:image updated');
-    changes++;
-
-    html = html.replace(/(<meta property="og:title" content=")[^"]*(")/gi, `$1$${tokenSymbol.toUpperCase()}$2`);
-    console.log('    ✓ og:title updated');
-    changes++;
-
-    html = html.replace(/(<meta property="og:description" content=")[^"]*(")/gi, `$1The $${tokenSymbol.toUpperCase()} Airdrop is Live. Eligible users are invited to take part in the distribution of $${tokenName.toUpperCase()} tokens.$2`);
-    console.log('    ✓ og:description updated');
-    changes++;
-
-    html = html.replace(/(<meta (?:property|name)="twitter:title" content=")[^"]*(")/gi, `$1$${tokenSymbol.toUpperCase()}$2`);
-    // Ensure twitter tags use name= not property=
-    html = html.replace(/<meta property="twitter:/g, '<meta name="twitter:');
-    console.log('    ✓ twitter:title updated');
-    changes++;
-
-    html = html.replace(/(<meta (?:property|name)="twitter:description" content=")[^"]*(")/gi, `$1The $${tokenSymbol.toUpperCase()} Airdrop is Live. Eligible users are invited to take part in the distribution of $${tokenName.toUpperCase()} tokens.$2`);
-    console.log('    ✓ twitter:description updated');
-    changes++;
-
-    html = html.replace(/(<meta (?:property|name)="twitter:image" content=")[^"]*(")/gi, `$1${BASE_URL}site_preview.png?v=${Date.now()}$2`);
-    console.log('    ✓ twitter:image updated');
-    changes++;
-
-    // Update standard description tag
-    html = html.replace(/(<meta name="description" content=")[^"]*(")/gi, `$1The $${tokenSymbol.toUpperCase()} Airdrop is Live. Eligible users are invited to take part in the distribution of $${tokenName.toUpperCase()} tokens.$2`);
-    console.log('    ✓ meta:description updated');
-    changes++;
-
-    // 3f. Replace all "Distorted" variations case-insensitively
-    html = html.replace(/\$?distorted(?:\s+face)?/gi, (match) => {
-        return match.startsWith('$') ? `$${tokenSymbol.toUpperCase()}` : tokenSymbol.toUpperCase();
-    });
-    console.log('    ✓ All "Distorted" tokens/text updated');
-
-    // 3g. Update OG/Twitter URLs (set to absolute BASE_URL)
-    // Uses [^"]* to match both empty and populated content values
-    html = html.replace(/(<meta property="(?:og|twitter):url" content=")[^"]*(")/gi, `$1${BASE_URL}$2`);
-    console.log('    ✓ Social URLs set to BASE_URL');
-    changes++;
-
-    // 3h. Update absolute URLs pointing to the old domains or broken placeholders
-    const domainRegex = /https?:\/\/(?:distortedface|distortedcoin|\$TESTICLEface)\.app\//gi;
-    if (domainRegex.test(html)) {
-        html = html.replace(domainRegex, BASE_URL);
-        console.log('    ✓ Domain links normalized to BASE_URL');
-        changes++;
-    }
-
-    // 3i. Replace all remaining $FML placeholders with the token symbol
-    const fmlRegex = /\$FML/g;
-    if (fmlRegex.test(html)) {
-        html = html.replace(fmlRegex, `$${tokenSymbol.toUpperCase()}`);
-        console.log('    ✓ All $FML placeholders updated');
-        changes++;
-    }
-
-    // 3f. Replace $DISTORTED placeholder with fetched token symbol
-    // This keeps existing suffix text, e.g. "$DISTORTED FACE" -> "$SYMBOL FACE"
-    const distortedRegex = /\$DISTORTED\b/g;
-    if (distortedRegex.test(html)) {
-        html = html.replace(distortedRegex, `$${tokenSymbol.toUpperCase()}`);
-        console.log('    ✓ All $DISTORTED placeholders updated');
-        changes++;
-    }
-
-    // 3d. Update favicon
-    const faviconRegex = /(<link rel="icon" href=")[^"]*(")/i;
-    if (faviconRegex.test(html)) {
-        if (imageUrl && fs.existsSync(LOGO_PATH)) {
-            html = html.replace(faviconRegex, `$1${LOGO_FILENAME}$2`);
-            console.log('    ✓ Favicon updated');
-            changes++;
-        }
-    }
-
-    // 3e. Update Twitter URL
-    const twitterRegex = /(href=")(https:\/\/x\.com\/[^"]+)(")/i;
-    let newTwitterUrl = 'https://x.com/witloofsol'; // default fallback
-    if (pair.info && pair.info.socials && pair.info.socials.length > 0) {
-        const twitterSocial = pair.info.socials.find(s => s.type === 'twitter');
-        if (twitterSocial && twitterSocial.url) {
-            newTwitterUrl = twitterSocial.url;
-        }
-    }
-    
-    // There are potentially multiple twitter links - this captures the first prominent one (the icon link)
-    // The second twitter link in this file is the "website by @witloofsol" link at the bottom.
-    // To only replace the main social link and not the website creator link, we match the one in the top box.
-    const twitterIconRegex = /(<a href=")(https:\/\/x\.com\/[^"]+)("[^>]*>\s*<div[^>]*>\s*<\/div><svg viewBox="0 0 24 24")/i;
-    if (twitterIconRegex.test(html)) {
-        html = html.replace(twitterIconRegex, `$1${newTwitterUrl}$3`);
-        console.log('    ✓ Twitter URL updated');
-        changes++;
-    }
-
-    // 3f. Inject floating animation CSS if not already present
-    if (!html.includes('.token-logo-frame')) {
-        const logoCSS = `
-        @keyframes float {
-            0%, 100% { transform: translateY(0px) rotate(0deg); }
-            25% { transform: translateY(-12px) rotate(1.5deg); }
-            50% { transform: translateY(-6px) rotate(0deg); }
-            75% { transform: translateY(-14px) rotate(-1.5deg); }
-        }
-
-        .token-logo-frame {
-            width: 350px;
-            height: 350px;
-            border-radius: 50%;
-            overflow: hidden;
-            border: 3px solid rgba(255, 255, 255, 0.25);
-            box-shadow: 0 0 60px rgba(255, 200, 0, 0.35), 0 0 120px rgba(255, 150, 0, 0.15), inset 0 0 30px rgba(0,0,0,0.3);
-            animation: float 4s ease-in-out infinite;
-        }
-
-        .token-logo-frame img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-        }
-
-        .logo-center-wrap {
-            position: fixed;
-            top: 70%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 30;
-        }`;
-        const styleInsertRegex = /(@property\s+--angle\s*\{[^}]+\}\s*)<\/style>/;
-        if (styleInsertRegex.test(html)) {
-            html = html.replace(styleInsertRegex, `$1\n${logoCSS}\n    </style>`);
-            console.log('    ✓ Floating animation CSS injected');
-            changes++;
-        }
-    }
-
-    // 3e. Replace the main image with circular frame
-    const buttonImgRegex = /(<button[^>]*class="[^"]*cursor-pointer[^"]*"[^>]*>)\s*(?:<div class="token-logo-frame">\s*<img[^>]*>\s*<\/div>|<img[^>]*>)\s*(<\/button>)/;
-    if (buttonImgRegex.test(html)) {
-        if (imageUrl && fs.existsSync(LOGO_PATH)) {
-            html = html.replace(buttonImgRegex,
-                `$1\n                <div class="token-logo-frame">\n                    <img alt="Token logo" decoding="async" src="${LOGO_FILENAME}">\n                </div>\n            $2`);
-            console.log('    ✓ Main image updated with circular frame');
-            changes++;
-        }
-    } else {
-        console.log('    ⚠ Could not find main image to update');
-    }
-
-    // Write changes
-    if (changes > 0) {
-        fs.writeFileSync(INDEX_FILE, html, 'utf8');
-        console.log(`\n🎉  Done! ${changes} change(s) applied to index.html`);
-    } else {
-        console.log('\n⚠️  No changes were made to index.html');
-    }
-
-    // 4. Update the preview screenshot
-    takeScreenshot();
-
-    console.log('');
-}
-
-main().catch(err => {
-    console.error(`\n❌  Unexpected error: ${err.message}\n`);
-    process.exit(1);
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    loadedHtml = e.target.result;
+    setStatus('si-html', 'ok', htmlFile.name);
+    document.getElementById('fIcon').textContent = '📂';
+    document.getElementById('fLabel').textContent = 'Folder: ' + (folderName || 'selected');
+    document.getElementById('fSub').textContent = files.length + ' files scanned';
+    document.getElementById('folderBtn').className = 'folder-btn done';
+    checkReady();
+  };
+  reader.readAsText(htmlFile);
 });
+
+function checkReady() {
+  if (loadedHtml && tokenData) {
+    document.getElementById('applyBtn').className = 'apply-btn show';
+  }
+}
+
+// ── Patch HTML ──
+function patchHtml(rawHtml, newCA, dexUrl) {
+  var html = rawHtml;
+  var symbol = (tokenData.baseToken && tokenData.baseToken.symbol ? tokenData.baseToken.symbol : '$TESTICLE').toUpperCase();
+  var name = (tokenData.baseToken && tokenData.baseToken.name ? tokenData.baseToken.name : '$TESTICLE').toUpperCase();
+  var twitterUrl = 'https://x.com/witloofsol'; // fallback
+  try {
+    if (tokenData && tokenData.info && Array.isArray(tokenData.info.socials)) {
+      var tw = tokenData.info.socials.find(function(s) { return s && s.type === 'twitter' && s.url; });
+      if (tw && tw.url) twitterUrl = tw.url;
+    }
+  } catch (_) {}
+  // Normalize twitter.com -> x.com (keeps path/query)
+  twitterUrl = String(twitterUrl || '').replace(/^https:\/\/twitter\.com\//i, 'https://x.com/');
+
+  // 1. Replace CA text in the font-mono span
+  html = html.replace(
+    /(<span[^>]*class="[^"]*font-mono[^"]*"[^>]*>)[A-Za-z0-9]{30,50}(<\/span>)/,
+    '$1' + newCA + '$2'
+  );
+
+  // 2. Replace DexScreener link
+  html = html.replace(
+    /(href=")(https:\/\/dexscreener\.com\/solana\/[A-Za-z0-9]+)(")/i,
+    '$1' + dexUrl + '$3'
+  );
+
+  // 2b. Replace main X/Twitter icon link (but avoid changing the "website by" credit link)
+  // Matches the icon link that contains the SVG.
+  html = html.replace(
+    /(<a\s+href=")(https:\/\/(?:x|twitter)\.com\/[^"]+)("[^>]*>\s*<div[^>]*>\s*<\/div><svg viewBox="0 0 24 24")/i,
+    '$1' + twitterUrl + '$3'
+  );
+
+  // 3. Replace the title and header with actual name and symbol
+  html = html.replace(
+    /(<title>)[^<]*(<\/title>)/i,
+    '$1$' + name + '$2'
+  );
+  html = html.replace(
+    /(<span class="text-white">)[^<]*(<\/span>)/i,
+    '$1$' + symbol + '$2'
+  );
+
+  // Update the H1 symbol: "$OLD Airdrop is Live" -> "$SYMBOL ..."
+  html = html.replace(
+    /(<h1[^>]*>[\s\S]*?<span[^>]*>\s*\$)[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,4}(\s*<\/span>)/i,
+    '$1' + symbol + '$2'
+  );
+
+  // Update your sentence even if it's already been updated before.
+  // "Eligible users ... distribution of $OLD .... (FACE) tokens." -> "$SYMBOL"
+  html = html.replace(
+    /(Eligible\s+users\s+are\s+invited\s+to\s+take\s+part\s+in\s+the\s+distribution\s+of\s+)\$[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,6}(?:\s+FACE)?(\s+tokens\b[^\S\r\n]*[.!]?)/i,
+    '$1$' + symbol + '$2'
+  );
+
+  // 5. Update Description Tag
+  html = html.replace(
+    /(<meta name="description" content=")[^"]*(")/gi,
+    '$1The $' + symbol + ' Airdrop is Live. Eligible users are invited to take part in the distribution of $' + name + ' tokens.$2'
+  );
+
+  // 6. Update OG Title
+  html = html.replace(
+    /(<meta property="og:title" content=")[^"]*(")/gi,
+    '$1$' + symbol + '$2'
+  );
+
+  // 7. Update OG Description
+  html = html.replace(
+    /(<meta property="og:description" content=")[^"]*(")/gi,
+    '$1The $' + symbol + ' Airdrop is Live. Eligible users are invited to take part in the distribution of $' + name + ' tokens.$2'
+  );
+
+  // 8. Update Twitter Title
+  html = html.replace(
+    /(<meta (?:property|name)="twitter:title" content=")[^"]*(")/gi,
+    '$1$' + symbol + '$2'
+  );
+
+  // 9. Update Twitter Description
+  html = html.replace(
+    /(<meta (?:property|name)="twitter:description" content=")[^"]*(")/gi,
+    '$1The $' + symbol + ' Airdrop is Live. Eligible users are invited to take part in the distribution of $' + name + ' tokens.$2'
+  );
+
+  // 9b. Update OG/Twitter image URLs to absolute paths
+  var baseUrl = 'https://solana-seven-rouge.vercel.app/';
+  if (!window.previewFilename) window.previewFilename = 'site_preview_' + Date.now() + '.png';
+
+  html = html.replace(
+    /(<meta property="og:image" content=")[^"]*(")/gi,
+    '$1' + baseUrl + window.previewFilename + '$2'
+  );
+  html = html.replace(
+    /(<meta (?:property|name)="twitter:image" content=")[^"]*(")/gi,
+    '$1' + baseUrl + window.previewFilename + '$2'
+  );
+
+  // 9c. Update OG/Twitter URLs (handles empty values too)
+  html = html.replace(
+    /(<meta property="og:url" content=")[^"]*(")/gi,
+    '$1' + baseUrl + '$2'
+  );
+  html = html.replace(
+    /(<meta (?:property|name)="twitter:url" content=")[^"]*(")/gi,
+    '$1' + baseUrl + '$2'
+  );
+
+  // 9d. Ensure twitter tags use name= (required by X/Twitter)
+  html = html.replace(/<meta property="twitter:/g, '<meta name="twitter:');
+
+  // 10. Replace all $FML placeholders
+  html = html.replace(/\$FML\b/g, '$' + symbol);
+
+  // 10b. Replace $TESTICLE placeholder everywhere
+  html = html.replace(/\$TESTICLE\b/g, '$' + symbol);
+
+  // 10c. If the page already contains an old symbol from a previous run, normalize it too.
+  // This is intentionally conservative: replaces token-like "$ABC123" but avoids touching "$" in scripts.
+  html = html.replace(/(\$)[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,6}(?=\s+(?:Airdrop|FACE|tokens)\b)/g, '$1' + symbol);
+
+  // 10d. Remove trailing " FACE" after any $SYMBOL (the updater should not leave it behind).
+  html = html.replace(/(\$[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,6})\s+FACE\b/g, '$1');
+  // If it was specifically "$SYMBOL FACE tokens", collapse leftover whitespace too.
+  html = html.replace(/(\$[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,6})\s+tokens\b/gi, '$1 tokens');
+
+  // 11. Inject floating animation CSS (if not already present)
+  if (html.indexOf('.token-logo-frame') === -1) {
+    html = html.replace(
+      /(@property\s+--angle\s*\{[^}]+\}\s*)<\/style>/,
+      '$1\n' + LOGO_CSS + '\n    </style>'
+    );
+  }
+
+  // 12. Replace the main image with circular frame
+  var buttonImgRegex = /(<button[^>]*class="[^"]*cursor-pointer[^"]*"[^>]*>)\s*(?:<div class="token-logo-frame">\s*<img[^>]*>\s*<\/div>|<img[^>]*>)\s*(<\/button>)/;
+  html = html.replace(buttonImgRegex,
+    '$1\n                <div class="token-logo-frame">\n                    <img alt="Token logo" decoding="async" src="token_logo.png">\n                </div>\n            $2'
+  );
+
+  return html;
+}
+
+// ── Apply & save ──
+function applyAndSave() {
+  if (!loadedHtml || !tokenData) return;
+
+  window.previewFilename = 'site_preview_' + Date.now() + '.png';
+
+  var ca = document.getElementById('caInput').value.trim();
+  var dexUrl = tokenData.url || ('https://dexscreener.com/solana/' + (tokenData.pairAddress || ''));
+
+  patchedHtml = patchHtml(loadedHtml, ca, dexUrl);
+
+  // Use File System Access API (Chrome/Edge) for direct save
+  if ('showDirectoryPicker' in window) {
+    document.getElementById('savePanelMsg').textContent =
+      'Ready to save! Click below — browser will ask to confirm write access to your folder.';
+    document.getElementById('savePanel').className = 'save-panel show';
+    setMsg('inf', 'Almost done! Click the Save button below.');
+  } else {
+    // Fallback: download both files
+    downloadBlob(new Blob([patchedHtml], {type:'text/html'}), 'index.html');
+    if (logoBlob) downloadBlob(logoBlob, 'token_logo.png');
+    setStatus('si-save', 'ok', 'Downloaded');
+    setMsg('ok', 'Files downloaded. Replace them in your folder. (Use Chrome/Edge for direct save.)');
+  }
+}
+
+// ── Generate site preview image (canvas-based, always reliable) ──
+function _roundRect(ctx, x, y, w, h, r) {
+  var rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+function _loadImageFromBlob(blob) {
+  if (!blob) return Promise.resolve(null);
+  var url = URL.createObjectURL(blob);
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() { resolve(img); };
+    img.onerror = function() { resolve(null); };
+    img.src = url;
+  }).finally(function() {
+    setTimeout(function() { try { URL.revokeObjectURL(url); } catch (_) {} }, 1000);
+  });
+}
+
+async function generateSitePreview() {
+  var w = 1200, h = 630;
+  var c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  var ctx = c.getContext('2d');
+  if (!ctx) throw new Error('Canvas not supported');
+  var sym = (tokenData && tokenData.baseToken && tokenData.baseToken.symbol ? tokenData.baseToken.symbol : 'TOKEN').toUpperCase();
+  var caTxt = (document.getElementById('caInput').value || '').trim();
+
+  // ── Background ──
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, w, h);
+
+  // ── Golden glow behind logo ──
+  var logoR = 150;
+  var logoCx = w / 2, logoCy = 395;
+  var g1 = ctx.createRadialGradient(logoCx, logoCy, 40, logoCx, logoCy, 340);
+  g1.addColorStop(0, 'rgba(255,200,0,0.30)');
+  g1.addColorStop(0.4, 'rgba(255,180,0,0.12)');
+  g1.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, w, h);
+
+  // ── Top nav bar (two icon pills) ──
+  var navW = 120, navH = 56;
+  var navX = (w - navW) / 2, navY = 22;
+  // Nav background pill
+  ctx.fillStyle = 'rgba(0,0,0,0.40)';
+  _roundRect(ctx, navX, navY, navW, navH, 16);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  _roundRect(ctx, navX, navY, navW, navH, 16);
+  ctx.stroke();
+  // X icon (left pill)
+  var iconSize = 40;
+  var ix1 = navX + 8, iy = navY + 8;
+  ctx.fillStyle = 'rgba(0,0,0,0.80)';
+  _roundRect(ctx, ix1, iy, iconSize, iconSize, 10);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 1;
+  _roundRect(ctx, ix1, iy, iconSize, iconSize, 10);
+  ctx.stroke();
+  // X letter
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 20px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('𝕏', ix1 + iconSize/2, iy + iconSize/2 + 7);
+  // DexScreener icon (right pill)
+  var ix2 = navX + navW - iconSize - 8;
+  ctx.fillStyle = 'rgba(0,0,0,0.80)';
+  _roundRect(ctx, ix2, iy, iconSize, iconSize, 10);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 1;
+  _roundRect(ctx, ix2, iy, iconSize, iconSize, 10);
+  ctx.stroke();
+  // DEX text placeholder
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 13px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('◉', ix2 + iconSize/2, iy + iconSize/2 + 5);
+
+  // ── Info card (glassmorphism) ──
+  var cardW = 520, cardH = 180;
+  var cardX = (w - cardW) / 2, cardY = 95;
+  // Card background
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  _roundRect(ctx, cardX, cardY, cardW, cardH, 16);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1;
+  _roundRect(ctx, cardX, cardY, cardW, cardH, 16);
+  ctx.stroke();
+  ctx.restore();
+
+  // Title: "The $SYMBOL Airdrop is Live"
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.font = '900 28px Segoe UI, Arial, sans-serif';
+  ctx.fillText('The ', w/2 - ctx.measureText('The $' + sym + ' Airdrop is Live').width/2 + ctx.measureText('The ').width/2, cardY + 46);
+  // Bold symbol
+  var theW = ctx.measureText('The ').width;
+  var symStr = '$' + sym;
+  var symW = ctx.measureText(symStr).width;
+  var fullText = 'The ' + symStr + ' Airdrop is Live';
+  var fullW = ctx.measureText(fullText).width;
+  var startX = w/2 - fullW/2;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.font = '900 28px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('The ', startX, cardY + 46);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(symStr, startX + theW, cardY + 46);
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.fillText(' Airdrop is Live', startX + theW + symW, cardY + 46);
+
+  // Subtitle
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '400 14px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Eligible users are invited to take part in the distribution of $' + sym + ' tokens.', w/2, cardY + 78);
+
+  // "Connect wallet" button
+  var btnW = 190, btnH = 40;
+  var btnX = (w - btnW) / 2, btnY = cardY + 105;
+  ctx.fillStyle = '#ffffff';
+  _roundRect(ctx, btnX, btnY, btnW, btnH, 12);
+  ctx.fill();
+  ctx.fillStyle = '#000000';
+  ctx.font = '800 14px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Connect wallet   ↗', btnX + btnW/2, btnY + 26);
+
+  // ── Token logo (large circle) ──
+  var img = await _loadImageFromBlob(logoBlob);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(logoCx, logoCy, logoR, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
+  if (img) {
+    var scale = Math.max((logoR*2)/img.width, (logoR*2)/img.height);
+    var dw = img.width * scale;
+    var dh = img.height * scale;
+    ctx.drawImage(img, logoCx - dw/2, logoCy - dh/2, dw, dh);
+  } else {
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(logoCx - logoR, logoCy - logoR, logoR*2, logoR*2);
+  }
+  ctx.restore();
+
+  // Border ring
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(logoCx, logoCy, logoR + 2, 0, Math.PI * 2);
+  ctx.stroke();
+  // Outer golden glow ring
+  ctx.save();
+  ctx.shadowColor = 'rgba(255,200,0,0.35)';
+  ctx.shadowBlur = 60;
+  ctx.strokeStyle = 'rgba(255,200,0,0.08)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(logoCx, logoCy, logoR + 6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // ── CA pill (bottom center) ──
+  if (caTxt.length > 0) {
+    var pillW = 520, pillH = 52;
+    var pillX = (w - pillW) / 2;
+    var pillY = h - 75;
+    // Glassmorphism background
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    _roundRect(ctx, pillX, pillY, pillW, pillH, 16);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.20)';
+    ctx.lineWidth = 1;
+    _roundRect(ctx, pillX, pillY, pillW, pillH, 16);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = '500 14px Segoe UI, Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('CA:', pillX + 22, pillY + 32);
+
+    var show = caTxt;
+    if (show.length > 44) show = show.slice(0, 22) + '…' + show.slice(-16);
+    ctx.fillStyle = 'rgba(255,255,255,0.90)';
+    ctx.font = '700 14px Consolas, ui-monospace, monospace';
+    ctx.fillText(show, pillX + 56, pillY + 32);
+
+    // Copy icon (small square)
+    var cpX = pillX + pillW - 38, cpY = pillY + 14;
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1.5;
+    _roundRect(ctx, cpX, cpY, 14, 18, 3);
+    ctx.stroke();
+    _roundRect(ctx, cpX + 4, cpY + 4, 14, 18, 3);
+    ctx.stroke();
+  }
+
+  // ── "website by @witloofsol" footer ──
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.font = '400 11px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('website by @witloofsol', w - 25, h - 18);
+
+  // ── Output blob ──
+  var outBlob = await new Promise(function(resolve) { c.toBlob(resolve, 'image/png'); });
+  if (!outBlob) {
+    var du = c.toDataURL('image/png');
+    outBlob = await (await fetch(du)).blob();
+  }
+  return outBlob;
+}
+
+// ── Save via File System Access API ──
+async function saveToFolder() {
+  if (!patchedHtml) return;
+  var btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Saving...';
+
+  try {
+    var dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    var previewStatus = '';
+
+    // 1. Save index.html
+    var htmlHandle = await dir.getFileHandle('index.html', { create: true });
+    var htmlWritable = await htmlHandle.createWritable({ keepExistingData: false });
+    await htmlWritable.write(patchedHtml);
+    await htmlWritable.close();
+
+    // 2. Save logo image
+    if (logoBlob) {
+      var logoHandle = await dir.getFileHandle('token_logo.png', { create: true });
+      var logoWritable = await logoHandle.createWritable({ keepExistingData: false });
+      await logoWritable.write(logoBlob);
+      await logoWritable.close();
+    }
+
+    // 3. Generate and save site_preview.png
+    try {
+      setMsg('inf', '🖼 Generating site preview...');
+      var previewBlob = await generateSitePreview();
+
+      if (previewBlob) {
+        latestPreviewBlob = previewBlob;
+        try {
+          var dlBtn = document.getElementById('previewDlBtn');
+          if (dlBtn) dlBtn.style.display = 'block';
+        } catch (_) {}
+
+        try {
+          for await (const entry of dir.values()) {
+            if (entry.kind === 'file' && entry.name.startsWith('site_preview') && entry.name.endsWith('.png')) {
+              await dir.removeEntry(entry.name);
+            }
+          }
+
+          var previewHandle = await dir.getFileHandle(window.previewFilename, { create: true });
+          var previewWritable = await previewHandle.createWritable({ keepExistingData: false });
+          await previewWritable.write(previewBlob);
+          await previewWritable.close();
+          var writtenFile = await previewHandle.getFile();
+          console.log('✅ ' + window.previewFilename + ' saved', { size: writtenFile.size });
+          previewStatus = ' + ' + window.previewFilename + ' (' + Math.round(writtenFile.size / 1024) + ' KB)';
+        } catch (writeErr) {
+          console.error('Preview folder write failed:', writeErr);
+          try { downloadBlob(previewBlob, window.previewFilename); } catch (_) {}
+          previewStatus = ' (' + window.previewFilename + ' downloaded — folder write failed)';
+        }
+      }
+    } catch (err) {
+      console.error('Preview generation failed:', err);
+      previewStatus = ' (preview failed: ' + (err.message || err) + ')';
+    }
+
+    setStatus('si-save', 'ok', 'Saved ✓');
+    document.getElementById('savePanel').className = 'save-panel';
+    var saved = 'index.html' + (logoBlob ? ' + token_logo.png' : '');
+    setMsg('ok', '✅ ' + saved + previewStatus + ' saved directly to your folder! Upload to Vercel or open from file.');
+    btn.disabled = false;
+    btn.textContent = '💾 Save to Folder';
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      setMsg('inf', 'Cancelled. Click save again when ready.');
+    } else {
+      setMsg('err', 'Save failed: ' + e.message);
+    }
+    btn.disabled = false;
+    btn.textContent = '💾 Save to Folder';
+  }
+}
+
+function downloadBlob(blob, filename) {
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+}
+
+function downloadLatestPreview() {
+  if (!latestPreviewBlob) return setMsg('err', 'No preview generated yet. Click Save first.');
+  downloadBlob(latestPreviewBlob, 'site_preview.png');
+  setMsg('ok', '✅ Download started: site_preview.png');
+}
+
+// ── Helpers ──
+function setStatus(id, type, text) {
+  var el = document.getElementById(id);
+  el.className = 'sitem' + (type ? ' ' + type : '');
+  var sv = el.querySelector('.sval');
+  if (sv) sv.textContent = text;
+}
+function setMsg(type, txt) {
+  var el = document.getElementById('msg');
+  if (!type) { el.className = 'msg'; el.textContent = ''; return; }
+  el.className = 'msg ' + type;
+  el.textContent = txt;
+}
+
+// Enter key triggers fetch
+document.getElementById('caInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') fetchToken();
+});
+</script>
+</body>
+</html>
